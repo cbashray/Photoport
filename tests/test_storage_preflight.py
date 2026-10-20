@@ -408,3 +408,34 @@ class TestStoragePreflightServiceExtended:
         assert info.is_unknown is True
         assert "403" in info.error
 
+    def test_storage_drops_between_preflight_and_upload_blocks_start(self, db: Database, tmp_path: Path):
+        """If storage drops between initial preflight and upload kickoff, start_migration rechecks and blocks upload."""
+        from photoport.config import AppConfig
+        from photoport.migration.migration_manager import MigrationManager
+        from photoport.storage.models import MediaItem, MediaItemStatus
+
+        repo = MediaItemRepository(db)
+        repo.insert(MediaItem(
+            archive_path="archive.zip", zip_member_path="photo.jpg", file_name="photo.jpg",
+            file_size=5 * 1024**3, status=MediaItemStatus.READY,
+        ))
+
+        config = AppConfig(temp_dir=tmp_path)
+        manager = MigrationManager(config=config, db=db)
+
+        # Preflight initially ran when 20 GB was free
+        manager.storage_info = StorageInfo(
+            total_bytes=100 * 1024**3, used_bytes=80 * 1024**3,
+            free_bytes=20 * 1024**3, available=True,
+        )
+
+        # But destination storage dropped to only 2 GB free (shortfall of >3 GB)
+        manager.storage_info = StorageInfo(
+            total_bytes=100 * 1024**3, used_bytes=98 * 1024**3,
+            free_bytes=2 * 1024**3, available=True,
+        )
+
+        with pytest.raises(ValueError, match="destination storage is insufficient"):
+            manager.start_migration(access_token_provider=lambda: "token")
+
+

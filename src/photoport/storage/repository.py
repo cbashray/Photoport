@@ -12,6 +12,7 @@ from photoport.storage.models import (
     MediaItemStatus,
     MediaType,
     MigrationSession,
+    UploadQualityMode,
 )
 
 logger = logging.getLogger("photoport.storage.repository")
@@ -342,32 +343,43 @@ class SessionRepository:
 
     def create(self, session: MigrationSession) -> int:
         """Create a new migration session."""
+        quality_str = (
+            session.quality_mode.value
+            if isinstance(session.quality_mode, UploadQualityMode)
+            else str(session.quality_mode)
+        )
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """INSERT INTO migration_sessions
-                   (started_at, total_archives, status, destination_account)
-                   VALUES (?, ?, ?, ?)""",
+                   (started_at, total_archives, status, destination_account, quality_mode)
+                   VALUES (?, ?, ?, ?, ?)""",
                 (session.started_at, session.total_archives, session.status,
-                 session.destination_account),
+                 session.destination_account, quality_str),
             )
             return cursor.lastrowid or 0
 
     def update(self, session: MigrationSession) -> None:
-        """Update session counters and status."""
+        """Update session counters, quality mode, and status."""
+        quality_str = (
+            session.quality_mode.value
+            if isinstance(session.quality_mode, UploadQualityMode)
+            else str(session.quality_mode)
+        )
         with self.db.transaction() as conn:
             conn.execute(
                 """UPDATE migration_sessions SET
                    completed_at = ?, total_files_discovered = ?, total_photos = ?,
                    total_videos = ?, total_uploaded = ?, total_verified = ?,
                    total_failed = ?, total_skipped = ?, total_needs_review = ?,
-                   status = ?
+                   status = ?, quality_mode = ?
                    WHERE id = ?""",
                 (
                     session.completed_at, session.total_files_discovered,
                     session.total_photos, session.total_videos,
                     session.total_uploaded, session.total_verified,
                     session.total_failed, session.total_skipped,
-                    session.total_needs_review, session.status, session.id,
+                    session.total_needs_review, session.status,
+                    quality_str, session.id,
                 ),
             )
 
@@ -380,19 +392,56 @@ class SessionRepository:
             row = cursor.fetchone()
             if not row:
                 return None
-            return MigrationSession(
-                id=row["id"],
-                started_at=row["started_at"],
-                completed_at=row["completed_at"],
-                total_archives=row["total_archives"],
-                total_files_discovered=row["total_files_discovered"],
-                total_photos=row["total_photos"],
-                total_videos=row["total_videos"],
-                total_uploaded=row["total_uploaded"],
-                total_verified=row["total_verified"],
-                total_failed=row["total_failed"],
-                total_skipped=row["total_skipped"],
-                total_needs_review=row["total_needs_review"],
-                status=row["status"],
-                destination_account=row["destination_account"],
+            return self._row_to_session(row)
+
+    def get_by_id(self, session_id: int) -> MigrationSession | None:
+        """Fetch a specific migration session by ID."""
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM migration_sessions WHERE id = ?",
+                (session_id,),
             )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self._row_to_session(row)
+
+    def get_all(self, limit: int = 100) -> list[MigrationSession]:
+        """Fetch all migration sessions ordered by newest first."""
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM migration_sessions ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            return [self._row_to_session(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def _row_to_session(row: dict) -> MigrationSession:
+        try:
+            quality_val = row["quality_mode"] or "original"
+        except (KeyError, IndexError):
+            quality_val = "original"
+
+        try:
+            quality_mode = UploadQualityMode(quality_val)
+        except ValueError:
+            quality_mode = UploadQualityMode.ORIGINAL
+
+        return MigrationSession(
+            id=row["id"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            total_archives=row["total_archives"],
+            total_files_discovered=row["total_files_discovered"],
+            total_photos=row["total_photos"],
+            total_videos=row["total_videos"],
+            total_uploaded=row["total_uploaded"],
+            total_verified=row["total_verified"],
+            total_failed=row["total_failed"],
+            total_skipped=row["total_skipped"],
+            total_needs_review=row["total_needs_review"],
+            status=row["status"],
+            destination_account=row["destination_account"],
+            quality_mode=quality_mode,
+        )
+

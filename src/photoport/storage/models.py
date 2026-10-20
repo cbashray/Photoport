@@ -75,6 +75,15 @@ class AlbumRecord:
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
+
+class UploadQualityMode(enum.Enum):
+    """Media upload quality modes."""
+
+    ORIGINAL = "original"
+    STORAGE_SAVER = "storage_saver"
+    EXPERIMENTAL_GPMC = "experimental_gpmc"
+
+
 @dataclass
 class MigrationSession:
     """Represents a migration job session."""
@@ -93,3 +102,5 @@ class MigrationSession:
     total_needs_review: int = 0
     status: str = "IN_PROGRESS"      # IN_PROGRESS, COMPLETED, PAUSED, CANCELLED, FAILED
     destination_account: str = ""
+    quality_mode: UploadQualityMode = UploadQualityMode.ORIGINAL
+

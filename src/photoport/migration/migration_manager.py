@@ -13,6 +13,7 @@ from photoport.archives.safe_extract import SafeExtractor
 from photoport.config import AppConfig
 from photoport.google_photos.album_service import AlbumService
 from photoport.google_photos.api_client import GooglePhotosClient
+from photoport.google_photos.backend_interface import get_upload_backend
 from photoport.google_photos.quota_service import QuotaService, StorageInfo
 from photoport.google_photos.upload_service import UploadService
 from photoport.metadata.album_manifest import AlbumManifest
@@ -30,6 +31,7 @@ from photoport.storage.models import (
     MediaItemStatus,
     MediaType,
     MigrationSession,
+    UploadQualityMode,
 )
 from photoport.storage.repository import (
     AlbumRepository,
@@ -230,11 +232,21 @@ class MigrationManager:
         access_token: str | None = None,
         storage_info: StorageInfo | None = None,
         refresh_storage: bool = False,
+        quality_mode: UploadQualityMode | str | None = None,
     ) -> dict:
         """Run comprehensive pre-migration storage preflight checks and return a detailed summary."""
         self._set_phase(MigrationPhase.CHECKING_STORAGE)
 
         target_info = storage_info if storage_info is not None else (None if refresh_storage else self.storage_info)
+
+        mode_val = quality_mode if quality_mode is not None else self.config.upload_quality_mode
+        if isinstance(mode_val, str):
+            try:
+                resolved_mode = UploadQualityMode(mode_val)
+            except ValueError:
+                resolved_mode = UploadQualityMode.ORIGINAL
+        else:
+            resolved_mode = mode_val
 
         result: StoragePreflightResult = self.preflight_service.run_preflight(
             scan_result=self.scan_result,
@@ -244,6 +256,8 @@ class MigrationManager:
             safety_margin_percent=self.config.storage_safety_margin_percent,
             safety_margin_min_bytes=self.config.storage_safety_margin_min_bytes,
             max_retries=self.config.max_retries,
+            quality_mode=resolved_mode,
+            storage_saver_estimated_ratio=self.config.storage_saver_estimated_ratio,
         )
         self.last_preflight = result
         self.storage_info = result.storage_info
@@ -254,9 +268,11 @@ class MigrationManager:
         preflight = {
             "status": result.status.value,
             "can_proceed": result.can_proceed,
+            "quality_mode": result.quality_mode.value,
             "total_items": total_items,
             "total_size_bytes": result.total_discovered_bytes,
             "remaining_upload_bytes": result.remaining_upload_bytes,
+            "estimated_upload_bytes": result.estimated_upload_bytes,
             "safety_margin_bytes": result.safety_margin_bytes,
             "total_required_bytes": result.total_required_bytes,
             "shortfall_bytes": result.shortfall_bytes,
@@ -408,13 +424,15 @@ class MigrationManager:
         access_token_provider: callable,
         recreate_albums: bool = True,
         progress_callback: callable | None = None,
+        quality_mode: UploadQualityMode | str | None = None,
     ) -> None:
-        """Execute the migration.
+        """Execute the migration using the selected or persisted upload quality mode.
 
         Args:
             access_token_provider: Callable that returns a current valid access token.
             recreate_albums: Whether to create album structure.
             progress_callback: Called with (completed, total, current_file) on each upload.
+            quality_mode: Upload quality mode to use (defaults to config or persisted session).
         """
         self._cancel_requested = False
         self._pause_requested = False
@@ -424,9 +442,42 @@ class MigrationManager:
         if any(recovery_stats.values()):
             logger.info("Crash recovery performed before starting: %s", recovery_stats)
 
+        # Check for existing incomplete session to preserve its quality mode across restarts
+        latest_session = self.session_repo.get_latest()
+        if latest_session and latest_session.status in ("IN_PROGRESS", "PAUSED"):
+            selected_quality = latest_session.quality_mode
+            self.session = latest_session
+            logger.info("Resuming session %d with persisted quality mode '%s'", self.session.id, selected_quality.value)
+        else:
+            mode_val = quality_mode if quality_mode is not None else self.config.upload_quality_mode
+            if isinstance(mode_val, str):
+                try:
+                    selected_quality = UploadQualityMode(mode_val)
+                except ValueError:
+                    selected_quality = UploadQualityMode.ORIGINAL
+            else:
+                selected_quality = mode_val
+
+            self.session = MigrationSession(
+                total_archives=len(self.scan_result.archives) if self.scan_result else 0,
+                total_files_discovered=self.media_repo.total_count(),
+                quality_mode=selected_quality,
+            )
+            session_id = self.session_repo.create(self.session)
+            self.session.id = session_id
+            logger.info("Created migration session %d with quality mode '%s'", session_id, selected_quality.value)
+
+        # Retrieve and validate backend for the selected mode
+        backend = get_upload_backend(selected_quality, self.config)
+        is_avail, avail_reason = backend.is_available()
+        if not is_avail:
+            raise ValueError(
+                f"Selected upload quality mode '{backend.display_name}' is not available: {avail_reason}"
+            )
+
         # Enforce storage preflight check immediately before starting upload
         access_token = access_token_provider()
-        preflight_dict = self.preflight_check(access_token)
+        preflight_dict = self.preflight_check(access_token, quality_mode=selected_quality)
         status = preflight_dict["status"]
 
         if status == PreflightStatus.INSUFFICIENT.value:
@@ -435,7 +486,7 @@ class MigrationManager:
             shortfall_str = format_bytes(preflight_dict["shortfall_bytes"])
             raise ValueError(
                 f"Migration stopped: destination storage is insufficient. "
-                f"Requires {req_str} (including safety buffer), but destination account has only {free_str} free. "
+                f"Requires {req_str} (including safety buffer for {backend.display_name}), but destination account has only {free_str} free. "
                 f"Shortfall: {shortfall_str}."
             )
         elif status == PreflightStatus.UNKNOWN.value:
@@ -444,16 +495,6 @@ class MigrationManager:
                 f"Migration stopped: destination storage capacity could not be verified ({error_reason}). "
                 "Capacity must be confirmed before starting full migration."
             )
-
-        # Create session
-        self.session = MigrationSession(
-            total_archives=len(self.scan_result.archives) if self.scan_result else 0,
-            total_files_discovered=self.media_repo.total_count(),
-        )
-        session_id = self.session_repo.create(self.session)
-        self.session.id = session_id
-
-        access_token = access_token_provider()
 
         # Create albums if requested
         if recreate_albums:
@@ -569,14 +610,26 @@ class MigrationManager:
                     if recreate_albums and item.album_name:
                         album_id = album_id_map.get(item.album_name, "")
 
-                    # Upload
-                    result = self.upload_service.upload_with_retry(
-                        item=item,
-                        file_path=file_path,
-                        access_token=access_token,
-                        album_id=album_id,
-                        cancel_flag=lambda: self._cancel_requested,
+                    # Prepare media via backend (e.g. StorageSaver converts photo to temporary downscaled staging file)
+                    is_item_photo = is_photo(item.file_name)
+                    upload_file_path, is_temporary_prepared = backend.prepare_media(
+                        media_path=file_path,
+                        temp_dir=self.config.temp_dir,
+                        is_photo=is_item_photo,
                     )
+
+                    try:
+                        # Upload
+                        result = self.upload_service.upload_with_retry(
+                            item=item,
+                            file_path=upload_file_path,
+                            access_token=access_token,
+                            album_id=album_id,
+                            cancel_flag=lambda: self._cancel_requested,
+                        )
+                    finally:
+                        if is_temporary_prepared:
+                            backend.cleanup_prepared(upload_file_path, is_temporary=True)
 
                     if result.success:
                         self._upload_count += 1

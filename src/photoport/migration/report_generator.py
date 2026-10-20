@@ -52,6 +52,12 @@ class ReportGenerator:
         skipped = counts.get("SKIPPED", 0)
         needs_review = counts.get("NEEDS_REVIEW", 0)
 
+        quality_mode_val = (
+            session.quality_mode.value
+            if session and hasattr(session, "quality_mode") and hasattr(session.quality_mode, "value")
+            else (str(session.quality_mode) if session and hasattr(session, "quality_mode") else "original")
+        )
+
         return {
             "generated_at": datetime.utcnow().isoformat(),
             "session": {
@@ -59,6 +65,7 @@ class ReportGenerator:
                 "completed_at": session.completed_at if session else "",
                 "status": session.status if session else "UNKNOWN",
                 "destination_account": session.destination_account if session else "",
+                "quality_mode": quality_mode_val,
             },
             "totals": {
                 "archives_processed": session.total_archives if session else 0,
@@ -186,6 +193,7 @@ class ReportGenerator:
             f"  Started:     {sess['started_at']}",
             f"  Completed:   {sess['completed_at']}",
             f"  Status:      {sess['status']}",
+            f"  Quality:     {sess.get('quality_mode', 'original')}",
             "",
             "─" * 60,
             "  SUMMARY",

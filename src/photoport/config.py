@@ -124,6 +124,10 @@ class AppConfig:
     storage_safety_margin_percent: float = 5.0  # 5% safety margin for live quota variance
     storage_safety_margin_min_bytes: int = 500 * 1024 * 1024  # 500 MB minimum buffer
     storage_recheck_interval_items: int = 50  # recheck quota during migration every 50 uploads
+    upload_quality_mode: str = "original"  # "original", "storage_saver", "experimental_gpmc"
+    storage_saver_max_megapixels: float = 16.0  # 16 MP cap for Storage Saver
+    storage_saver_quality: int = 85  # Compression quality for JPEG/WebP
+    storage_saver_estimated_ratio: float = 0.50  # Estimated size ratio for preflight calculation
 
     @property
     def db_path(self) -> Path:

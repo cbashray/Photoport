@@ -13,7 +13,7 @@ from enum import Enum
 
 from photoport.archives.archive_scanner import ArchiveScanResult
 from photoport.google_photos.quota_service import QuotaService, StorageInfo
-from photoport.storage.models import MediaItemStatus
+from photoport.storage.models import MediaItemStatus, UploadQualityMode
 from photoport.storage.repository import MediaItemRepository
 from photoport.utils.formatting import format_bytes
 
@@ -55,6 +55,10 @@ class StoragePreflightResult:
     remaining_items_count: int = 0
     remaining_upload_bytes: int = 0
 
+    # Quality mode and estimated payload
+    quality_mode: UploadQualityMode = UploadQualityMode.ORIGINAL
+    estimated_upload_bytes: int = 0
+
     # Safety buffer and total requirement
     safety_margin_percent: float = 5.0
     safety_margin_bytes: int = 0
@@ -77,9 +81,11 @@ class StoragePreflightResult:
         """Return a readable multi-line summary of preflight results."""
         lines = [
             f"Preflight Status     : {self.status.value}",
+            f"Quality Mode         : {self.quality_mode.value}",
             f"Destination Account  : {self.storage_info.user_email or 'Not connected'}",
             f"Available Storage    : {format_bytes(self.free_bytes)}",
-            f"Remaining Upload     : {format_bytes(self.remaining_upload_bytes)} ({self.remaining_items_count} files)",
+            f"Raw Media Size       : {format_bytes(self.remaining_upload_bytes)} ({self.remaining_items_count} files)",
+            f"Estimated Upload     : {format_bytes(self.estimated_upload_bytes or self.remaining_upload_bytes)}",
             f"Safety Margin        : {format_bytes(self.safety_margin_bytes)} ({self.safety_margin_percent:.1f}%)",
             f"Total Required       : {format_bytes(self.total_required_bytes)}",
         ]
@@ -112,6 +118,8 @@ class StoragePreflightService:
         safety_margin_percent: float = 5.0,
         safety_margin_min_bytes: int = 500 * 1024 * 1024,
         max_retries: int = 5,
+        quality_mode: UploadQualityMode | str = UploadQualityMode.ORIGINAL,
+        storage_saver_estimated_ratio: float = 0.50,
     ) -> StoragePreflightResult:
         """Run storage preflight analysis comparing payload with available destination capacity.
 
@@ -206,19 +214,54 @@ class StoragePreflightService:
             remaining_items_count = media_repo.remaining_item_count(max_retries=max_retries)
             remaining_upload_bytes = media_repo.remaining_upload_size(max_retries=max_retries)
 
-        # Step 4: Calculate configurable safety margin
-        if remaining_upload_bytes > 0:
-            calc_margin = int(remaining_upload_bytes * (safety_margin_percent / 100.0))
+        # Step 4: Adjust estimated payload according to quality mode
+        if isinstance(quality_mode, str):
+            try:
+                quality_mode = UploadQualityMode(quality_mode)
+            except ValueError:
+                quality_mode = UploadQualityMode.ORIGINAL
+
+        warnings: list[str] = []
+        recommendations: list[str] = []
+        is_mode_uncertain = False
+
+        if quality_mode == UploadQualityMode.ORIGINAL:
+            estimated_upload_bytes = remaining_upload_bytes
+        elif quality_mode == UploadQualityMode.STORAGE_SAVER:
+            estimated_upload_bytes = max(0, int(remaining_upload_bytes * storage_saver_estimated_ratio))
+            warnings.append(
+                f"Storage Saver estimated payload: {format_bytes(estimated_upload_bytes)} "
+                f"(~{int(storage_saver_estimated_ratio * 100)}% of raw {format_bytes(remaining_upload_bytes)}). "
+                "NOTE: Uploads are NOT quota-free; Google charges actual uploaded bytes against your storage quota."
+            )
+            warnings.append(
+                "Storage Saver size is an estimation; actual savings depend on source image resolution and compressibility."
+            )
+        elif quality_mode == UploadQualityMode.EXPERIMENTAL_GPMC:
+            # Unofficial gpmc / Pixel spoofing cannot guarantee zero quota without live verification
+            estimated_upload_bytes = 0
+            is_mode_uncertain = True
+            warnings.append(
+                "CRITICAL: Experimental zero-quota backend relies on unofficial Pixel XL spoofing. "
+                "Storage quota bypass is unverified and CANNOT be guaranteed. Google may still charge full quota or suspend the account."
+            )
+            recommendations.append(
+                "Do not use Experimental Zero-Quota for personal or production libraries. Use supported Original Quality or Storage Saver."
+            )
+        else:
+            estimated_upload_bytes = remaining_upload_bytes
+
+        # Calculate configurable safety margin based on estimated upload bytes
+        if estimated_upload_bytes > 0:
+            calc_margin = int(estimated_upload_bytes * (safety_margin_percent / 100.0))
             safety_margin_bytes = max(calc_margin, safety_margin_min_bytes)
         else:
             safety_margin_bytes = 0
 
-        total_required_bytes = remaining_upload_bytes + safety_margin_bytes
+        total_required_bytes = estimated_upload_bytes + safety_margin_bytes
         free_bytes = storage_info.free_bytes if storage_info.available else 0
 
         # Step 5: Tri-state capacity comparison
-        warnings: list[str] = []
-        recommendations: list[str] = []
         shortfall_bytes = 0
 
         if not storage_info.available or storage_info.is_unknown:
@@ -228,6 +271,10 @@ class StoragePreflightService:
             recommendations.append("Click 'Retry Storage Check' after checking internet connectivity.")
             recommendations.append("Ensure the Google Drive API is enabled in your Google Cloud project.")
             recommendations.append("If this is an unmetered institutional Workspace account, limit cannot be determined via Google API.")
+        elif is_mode_uncertain:
+            status = PreflightStatus.UNKNOWN
+            warnings.append("Migration capacity cannot be confirmed: quota behavior for experimental mode is unverified.")
+            recommendations.append("Switch to 'Original Quality' or 'Storage Saver' to verify capacity with supported Google APIs.")
         elif free_bytes < total_required_bytes:
             status = PreflightStatus.INSUFFICIENT
             shortfall_bytes = total_required_bytes - free_bytes
@@ -276,6 +323,8 @@ class StoragePreflightService:
             ambiguous_bytes=ambiguous_bytes,
             remaining_items_count=remaining_items_count,
             remaining_upload_bytes=remaining_upload_bytes,
+            quality_mode=quality_mode,
+            estimated_upload_bytes=estimated_upload_bytes,
             safety_margin_percent=safety_margin_percent,
             safety_margin_bytes=safety_margin_bytes,
             total_required_bytes=total_required_bytes,

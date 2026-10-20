@@ -28,6 +28,25 @@ class ArchiveEntry:
     crc32: int | None = None
     is_extracted_file: bool = False
 
+    def get_or_compute_crc32(self) -> int | None:
+        """Return CRC32 checksum from archive header, or compute for extracted file on collision."""
+        if self.crc32 is not None:
+            return self.crc32
+        if self.is_extracted_file:
+            try:
+                import zlib
+                full_path = os.path.join(self.archive_path, self.member_path)
+                crc = 0
+                with open(full_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        crc = zlib.crc32(chunk, crc)
+                self.crc32 = crc
+                return crc
+            except Exception as exc:
+                logger.debug("Could not compute CRC32 for extracted file %s: %s", self.member_path, exc)
+                return None
+        return None
+
 
 @dataclass
 class ArchiveScanResult:
@@ -75,13 +94,14 @@ class ArchiveScanResult:
 
     def calculate_metrics(self) -> None:
         """Calculate deduplicated and eligible media metrics and report limitations."""
-        seen_items: dict[tuple, ArchiveEntry] = {}
         unique_media: list[ArchiveEntry] = []
         self.duplicate_media_entries = []
         self.oversized_entries = []
         self.duplicate_media_bytes = 0
         self.oversized_media_bytes = 0
 
+        # Group eligible media by (filename.lower(), file_size)
+        potential_dups: dict[tuple[str, int], list[ArchiveEntry]] = {}
         for entry in self.media_entries:
             # Check Google Photos file size limits
             if is_photo(entry.file_name) and entry.file_size > PHOTO_MAX_SIZE:
@@ -93,20 +113,26 @@ class ArchiveScanResult:
                 self.oversized_media_bytes += entry.file_size
                 continue
 
-            # Identify duplicate entries across folders or archives (e.g. year folder vs album folder)
-            # Use CRC32 if available (ZIPs), or (filename, size) for extracted files
-            dedup_key = (
-                entry.file_name.lower(),
-                entry.file_size,
-                entry.crc32 if entry.crc32 is not None else 0,
-            )
+            key = (entry.file_name.lower(), entry.file_size)
+            potential_dups.setdefault(key, []).append(entry)
 
-            if dedup_key in seen_items:
-                self.duplicate_media_entries.append(entry)
-                self.duplicate_media_bytes += entry.file_size
+        for _key, entries in potential_dups.items():
+            if len(entries) == 1:
+                unique_media.append(entries[0])
             else:
-                seen_items[dedup_key] = entry
-                unique_media.append(entry)
+                # Multiple items share exact filename and size.
+                # Use CRC32 to distinguish different photos from true duplicates.
+                seen_crcs: set[int] = set()
+                for entry in entries:
+                    crc = entry.get_or_compute_crc32()
+                    if crc is not None and crc in seen_crcs:
+                        # True duplicate (same name, same size, same CRC32)
+                        self.duplicate_media_entries.append(entry)
+                        self.duplicate_media_bytes += entry.file_size
+                    else:
+                        if crc is not None:
+                            seen_crcs.add(crc)
+                        unique_media.append(entry)
 
         self.deduplicated_media_bytes = sum(e.file_size for e in unique_media)
         self.eligible_media_bytes = self.deduplicated_media_bytes

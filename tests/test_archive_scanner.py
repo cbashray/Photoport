@@ -208,3 +208,85 @@ def test_scanning_limitations_reported(scanner: ArchiveScanner, valid_takeout_zi
     assert any("central directory" in s for s in result.scanning_limitations)
     assert any("Duplicate" in s for s in result.scanning_limitations)
 
+
+def test_different_photos_sharing_name_and_size_not_excluded_in_zips(scanner: ArchiveScanner, tmp_path: Path):
+    """Confirm different photos sharing exact filename and byte length in ZIPs are NOT falsely deduplicated."""
+    zip1 = tmp_path / "album_a.zip"
+    zip2 = tmp_path / "album_b.zip"
+
+    # Same name "IMG_0001.JPG", same byte size (100 bytes), but completely DIFFERENT content/CRC32
+    content_a = b"\xff\xd8\xff" + b"A" * 97
+    content_b = b"\xff\xd8\xff" + b"B" * 97
+
+    with zipfile.ZipFile(zip1, "w") as zf:
+        zf.writestr("Takeout/2021/IMG_0001.JPG", content_a)
+
+    with zipfile.ZipFile(zip2, "w") as zf:
+        zf.writestr("Takeout/2022/IMG_0001.JPG", content_b)
+
+    result = scanner.scan_archives([str(zip1), str(zip2)])
+
+    assert result.total_media_count == 2
+    assert result.total_duplicate_count == 0  # Neither should be marked as duplicate
+    assert result.eligible_media_count == 2
+    assert result.eligible_media_bytes == 200
+
+
+def test_different_photos_sharing_name_and_size_not_excluded_in_extracted_folder(scanner: ArchiveScanner, tmp_path: Path):
+    """Confirm different photos sharing exact filename and byte length in extracted folders are NOT falsely deduplicated."""
+    folder = tmp_path / "TakeoutFolder"
+    dir_a = folder / "Google Photos" / "Trip1"
+    dir_b = folder / "Google Photos" / "Trip2"
+    dir_a.mkdir(parents=True)
+    dir_b.mkdir(parents=True)
+
+    content_a = b"\xff\xd8\xff" + b"X" * 150
+    content_b = b"\xff\xd8\xff" + b"Y" * 150
+
+    (dir_a / "photo.jpg").write_bytes(content_a)
+    (dir_b / "photo.jpg").write_bytes(content_b)
+
+    result = scanner.scan_archives([str(folder)])
+
+    assert result.total_media_count == 2
+    assert result.total_duplicate_count == 0
+    assert result.eligible_media_count == 2
+    assert result.eligible_media_bytes == len(content_a) + len(content_b)
+
+
+def test_empty_archive_and_empty_folder(scanner: ArchiveScanner, tmp_path: Path):
+    """Scanning empty ZIP archives and empty directory trees succeeds with 0 media and 0 errors."""
+    empty_zip = tmp_path / "empty.zip"
+    with zipfile.ZipFile(empty_zip, "w"):
+        pass
+
+    empty_dir = tmp_path / "empty_dir"
+    empty_dir.mkdir()
+
+    result = scanner.scan_archives([str(empty_zip), str(empty_dir)])
+    assert result.total_media_count == 0
+    assert result.eligible_media_bytes == 0
+    assert len(result.errors) == 0
+
+
+def test_misleading_filenames_classification(scanner: ArchiveScanner, tmp_path: Path):
+    """Test that misleading filenames (e.g. photo.jpg.json, photo.json.jpg, notes.txt) are correctly classified."""
+    zip_path = tmp_path / "misleading.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        # Sidecar with photo in name
+        zf.writestr("Takeout/photo.jpg.json", '{"title": "sidecar"}')
+        # Photo with json in name
+        zf.writestr("Takeout/photo.json.jpg", b"\xff\xd8\xff" + b"\x00" * 100)
+        # Text file with jpg in name
+        zf.writestr("Takeout/notes.jpg.txt", "just text")
+        # Unsupported file
+        zf.writestr("Takeout/archive.tar.gz", b"\x00" * 50)
+
+    result = scanner.scan_archives([str(zip_path)])
+    assert result.total_media_count == 1
+    assert result.media_entries[0].file_name == "photo.json.jpg"
+    assert result.total_sidecar_count == 1
+    assert result.sidecar_entries[0].file_name == "photo.jpg.json"
+    assert result.total_unsupported_count == 2
+
+
