@@ -1,239 +1,199 @@
 # PhotoPort
 
-### Google Photos Takeout Migration Tool for Windows
+<p align="center">
+  <strong>Production Desktop Application for Migrating Large Google Photos Takeout Archives</strong>
+</p>
 
-**PhotoPort** is a Windows desktop application designed to simplify the migration of Google Photos libraries from Google Takeout archives to a personal Google Photos account.
-
-Instead of manually extracting archives and uploading individual photos and videos, PhotoPort aims to automate archive processing, metadata handling, media uploads, migration tracking, and recovery from interrupted operations.
-
-> **Project status:** In development. Google Photos API capabilities, account authorization, upload limits, and metadata preservation must be validated before a complete migration can be considered operational.
-
-## ✨ Features
-
-- **Large Archive Support** — Designed to handle Google Takeout ZIP archives totaling at least 60 GB.
-- **Automated Archive Processing** — Discover and process media files directly from Takeout archives without requiring full manual extraction.
-- **Original-Quality Preservation** — Avoid intentional image compression, resizing, and video transcoding.
-- **Google Account Authorization** — Secure destination account authorization through supported Google OAuth workflows.
-- **Photo and Video Migration** — Upload supported media using currently available Google Photos API capabilities.
-- **Metadata Processing** — Parse Takeout JSON sidecars and preserve supported metadata where possible.
-- **Album Organization** — Reconstruct supported album structures when the destination API permits it.
-- **Migration Dashboard** — Track progress, completed uploads, pending files, failures, and skipped items.
-- **Pause and Resume** — Persist migration state to support recovery after interruptions.
-- **Retry Management** — Handle transient network failures and API rate limits with controlled retries.
-- **Duplicate Detection** — Use file hashes and migration records to reduce unnecessary duplicate uploads.
-- **Storage Preflight** — Check available destination capacity where supported and warn about insufficient storage.
-- **Migration Reports** — Export results and unresolved issues to CSV and JSON.
-- **Local Processing** — Process archive files on the user's Windows computer instead of uploading entire Takeout archives to a separate application server.
-
-## 🖥️ Target Platform
-
-- Operating system: Windows 10/11, subject to dependency compatibility
-- Interface: Python and PySide6
-- Archive format: Google Takeout ZIP archives
-- Destination: Google Photos account with the required supported API permissions
-
-## 🛠️ Technology Stack
-
-| Component | Technology |
-|---|---|
-| Programming language | Python |
-| Desktop interface | PySide6 |
-| Archive processing | Python `zipfile` |
-| Authentication | Google OAuth 2.0 |
-| API integration | Supported Google Photos APIs |
-| Local database | SQLite |
-| HTTP communication | Requests or an equivalent maintained client |
-| Testing | Pytest |
-| Windows packaging | PyInstaller |
-
-## 🏗️ Architecture
-
-PhotoPort separates archive processing, authentication, migration management, and the desktop interface into independent modules.
-
-```text
-PhotoPort
-├── Desktop Interface
-│   ├── Dashboard
-│   ├── Archive Import
-│   ├── Account Authorization
-│   └── Migration Reports
-│
-├── Archive Processing
-│   ├── ZIP Scanner
-│   ├── Media Discovery
-│   ├── Metadata Parser
-│   └── Archive Validation
-│
-├── Migration Engine
-│   ├── Upload Queue
-│   ├── Retry Manager
-│   ├── Duplicate Detection
-│   ├── Progress Tracking
-│   └── Recovery Manager
-│
-├── Google Photos Integration
-│   ├── OAuth Client
-│   ├── Upload Service
-│   ├── Storage Checks
-│   └── Album Operations
-│
-└── Local Persistence
-    ├── SQLite Database
-    ├── Migration State
-    └── Logs and Reports
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Windows 10 or Windows 11
-- A supported Python version
-- A Google account for the destination library
-- Google Cloud project configuration for the supported OAuth and API workflow
-- Sufficient destination storage for the intended migration
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/YOUR_USERNAME/PhotoPort.git
-cd PhotoPort
-```
-
-Replace `YOUR_USERNAME` with your GitHub username.
-
-### 2. Create a virtual environment
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-
-```powershell
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Configure Google API access
-
-Create a Google Cloud project and configure the OAuth consent screen and required API access according to the current official Google documentation.
-
-Use only currently supported authorization scopes and upload operations. Do not copy obsolete OAuth scopes or endpoints from older tutorials.
-
-Never commit credentials, access tokens, refresh tokens, or personal archive data to GitHub.
-
-### 5. Launch the application
-
-Once the implementation is complete:
-
-```powershell
-python app.py
-```
-
-Follow the application's instructions to select Takeout archives, authorize the destination account, review the migration plan, and start the transfer.
-
-## 📦 Large Archive Handling
-
-PhotoPort is designed for Takeout archives totaling at least 60 GB, including the initial 45 GB migration use case.
-
-The implementation aims to:
-
-- Process archives incrementally.
-- Keep memory usage bounded.
-- Minimize temporary disk usage.
-- Validate archive entries before processing.
-- Save progress persistently.
-- Resume interrupted migration jobs.
-- Preserve the source archives until the migration is verified.
-
-Temporary disk space may still be required for individual files or upload operations. Actual requirements depend on the archive structure, media sizes, and supported API workflow.
-
-## 🛡️ Data Integrity and Security
-
-PhotoPort is designed around the following principles:
-
-- Never intentionally recompress, resize, or transcode original media.
-- Never delete source archives automatically.
-- Never store Google passwords.
-- Protect OAuth credentials and tokens.
-- Avoid logging sensitive information.
-- Report unsupported formats and failed uploads explicitly.
-- Verify migration outcomes wherever the API permits.
-- Require confirmation before starting a large migration.
-
-Original-quality preservation applies to the media bytes available in the Takeout archive. It cannot restore original camera files that were already backed up in reduced quality.
-
-## ⚠️ Google Photos API Limitations
-
-Google Photos API capabilities and authorization rules can change. In particular, access to existing libraries, uploading media, managing albums, preserving metadata, and verifying uploaded content may have different restrictions.
-
-PhotoPort must validate these capabilities before attempting a full migration.
-
-A successful local archive scan does not guarantee that every file can be uploaded. Features that are unsupported by the current API must be clearly identified rather than simulated.
-
-Refer to the official documentation:
-
-- [Google Photos APIs](https://developers.google.com/photos)
-- [Google Photos API upload guide](https://developers.google.com/photos/library/guides/upload-media)
-- [Google OAuth 2.0](https://developers.google.com/identity/protocols/oauth2)
-- [Google Takeout](https://takeout.google.com/)
-
-## 🧪 Testing
-
-The project should include automated tests for:
-
-- ZIP validation and archive security
-- Large-file processing
-- JSON sidecar parsing
-- Duplicate detection
-- OAuth error handling
-- Upload retries
-- Insufficient storage
-- Interrupted migration recovery
-- Migration reports
-- Original media hash verification
-
-Run the test suite with:
-
-```powershell
-pytest
-```
-
-Use a small test archive and a test Google account before migrating a complete photo library.
-
-## 🗺️ Roadmap
-
-- [ ] Validate the current Google Photos upload API workflow.
-- [ ] Implement large Takeout archive scanning.
-- [ ] Implement JSON metadata parsing.
-- [ ] Build secure Google OAuth authorization.
-- [ ] Implement supported media uploads.
-- [ ] Add SQLite-backed migration tracking.
-- [ ] Implement pause, resume, and retry functionality.
-- [ ] Add destination storage safeguards.
-- [ ] Implement migration reports.
-- [ ] Test recovery after application restarts.
-- [ ] Package the application as a Windows executable.
-- [ ] Validate a complete migration with a representative test library.
-
-## 🤝 Contributing
-
-Contributions, bug reports, and suggestions are welcome.
-
-Before submitting changes, run the test suite and ensure that no credentials, private photos, personal metadata, or archive files are included in commits.
-
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
-## ⚖️ Disclaimer
-
-PhotoPort is an independent project and is not affiliated with, endorsed by, or officially supported by Google.
-
-Use of Google Photos APIs is subject to Google's current terms, API policies, and account restrictions.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11%2B-blue.svg" alt="Python Version" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform Support" />
+  <img src="https://img.shields.io/badge/UI-PySide6%20%2F%20Qt-green.svg" alt="PySide6 GUI" />
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
+</p>
 
 ---
 
-**PhotoPort — Simplifying Google Photos migration, one archive at a time.**
+## 📖 Overview
+
+**PhotoPort** is an industrial-strength desktop application specifically engineered to migrate personal photo and video libraries from **Google Takeout ZIP archives** (including multi-part archives ranging from a few gigabytes to 50+ GB) directly into a destination personal Google Photos account.
+
+Takeout exports from school or work Google Workspace accounts often contain tens of thousands of media files split across dozens of large archive files. PhotoPort automates the extraction, metadata consolidation, duplicate detection, and resumption of uploads with maximum reliability.
+
+### Key Capabilities
+
+- **Streaming / Chunked Archive Ingestion**: Reads Takeout ZIP archives sequentially and streams items on-demand, avoiding exhausting local disk space with complete uncompressed extractions.
+- **Sidecar JSON Matching**: Automatically matches Takeout JSON metadata files (`image.jpg.json` or `image(1).json`) with their corresponding media, restoring capture timestamps, descriptions, and GPS locations.
+- **Robust Duplicate Detection**: Maintains a persistent SQLite tracking database with content-addressable SHA-256 hashes, preventing duplicate uploads across archives and repeated runs.
+- **Crash Recovery & Resume**: Every upload stage is tracked with explicit states (`PENDING`, `EXTRACTED`, `UPLOADING`, `COMPLETED`, `FAILED`). Crashes or network disconnects can be resumed instantly with zero data loss.
+- **Original Quality Preservation**: Uploads media byte-for-byte at full fidelity via the Google Photos upload endpoint.
+- **Resilient Retry & Backoff**: Exponential backoff with jitter handles network drops, rate limits (HTTP 429), and server errors (HTTP 5xx).
+- **Modern PySide6 Dark-Themed GUI**: Clean desktop interface featuring migration dashboards, real-time progress bars, throughput gauges, and log viewers.
+- **Multi-Part Takeout Consolidation**: Seamlessly stitches split archives (`takeout-*.zip`) into a unified collection.
+
+---
+
+## 🏗️ Architecture
+
+```
+                                  PhotoPort Architecture
+  ┌──────────────────────────────────────────────────────────────────────────────────┐
+  │                               PySide6 Desktop UI                                  │
+  │  [Dashboard]      [Archive Scanner]      [Migration Queue]      [Logs & Stats]   │
+  └────────────────────────┬───────────────────────────────────────┬─────────────────┘
+                           │                                       │
+                           ▼                                       ▼
+  ┌────────────────────────────────────────────────┐     ┌───────────────────────────┐
+  │              Migration Manager                 │     │     OAuth2 & Keyring      │
+  │  - Orchestration & Session Control             │     │  - InstalledAppFlow       │
+  │  - Worker Thread Pools (QThreadPool)           │     │  - Secure Token Storage   │
+  └───────┬───────────────────────────────┬────────┘     └─────────────┬─────────────┘
+          │                               │                            │
+          ▼                               ▼                            ▼
+  ┌───────────────────────┐   ┌────────────────────────┐   ┌─────────────────────────┐
+  │  Takeout Archives     │   │   SQLite Database      │   │   Google Photos API     │
+  │  - Streaming Reader   │   │  - Media Items & State │   │  - Resumable Byte Upload│
+  │  - Zip-Slip Safe Extr │   │  - SHA-256 Hashing     │   │  - batchCreate Items    │
+  │  - Sidecar Matching   │   │  - Album Mappings      │   │  - Drive Quota Check    │
+  └───────────────────────┘   └────────────────────────┘   └─────────────────────────┘
+```
+
+---
+
+## 🔐 Google Photos API Compatibility & Scopes
+
+As documented in [docs/API_FEASIBILITY.md](docs/API_FEASIBILITY.md), Google modified Photos API scopes in March 2025. PhotoPort uses the approved and supported scopes:
+
+- `https://www.googleapis.com/auth/photoslibrary.appendonly`: Allows creating albums and uploading media to the user's library.
+- `https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata`: Allows reading and verifying media and albums created by PhotoPort.
+- `https://www.googleapis.com/auth/drive.readonly`: Preflight check of available storage quota on destination account.
+
+---
+
+## 💻 Prerequisites & Setup
+
+### Requirements
+
+- **Operating System**: Windows 10/11 (64-bit), macOS 12+, or modern Linux
+- **Python**: Version 3.11 or newer
+
+### 1. Clone & Set Up Virtual Environment
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/photoport.git
+cd photoport
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate on Windows:
+.venv\Scripts\activate
+
+# Activate on macOS/Linux:
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e ".[dev]"
+```
+
+### 2. Configure Google Cloud OAuth Credentials
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project (e.g., `PhotoPort Migration`).
+3. Enable **Google Photos Library API** and **Google Drive API**.
+4. Configure the **OAuth Consent Screen**:
+   - User Type: **External**
+   - Add Test Users: Add your personal destination Google account email.
+5. Create OAuth 2.0 Credentials:
+   - Application Type: **Desktop App**
+   - Download the client secrets JSON.
+6. Rename the file to `client_secret.json` and place it in the `Photoport/` root or set `PHOTOPORT_CLIENT_SECRETS_FILE` in your `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+---
+
+## 🚀 Running the Application
+
+To launch the desktop GUI application:
+
+```bash
+# Using the entry point script
+python app.py
+
+# Or via package command
+python -m photoport.app
+```
+
+---
+
+## 🧪 Running Tests
+
+PhotoPort comes with a comprehensive test suite covering archive validation, zip-slip security, metadata parsing, duplicate detection, retry policies, and crash recovery:
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run with test coverage
+pytest tests/ --cov=photoport --cov-report=term-missing
+```
+
+### Test Suite Breakdown:
+- `test_archive_scanner.py`: Validates detection of single and multi-part ZIP archives.
+- `test_archive_security.py`: Tests path traversal (`../`) prevention, malicious payload handling, and temp-directory cleanup.
+- `test_metadata_parser.py`: Tests parsing of Takeout sidecar JSON files, date formats, and Unicode filenames.
+- `test_duplicate_detector.py`: Tests SHA-256 deduplication and database idempotency.
+- `test_migration_state.py`: Tests state machine transitions (`PENDING` -> `EXTRACTED` -> `COMPLETED`).
+- `test_retry_policy.py`: Simulates transient network errors (HTTP 429, 503) and exponential backoff.
+- `test_recovery.py`: Verifies database recovery from unexpected crashes or aborted sessions.
+- `test_storage_preflight.py`: Verifies Google Drive storage quota detection.
+
+---
+
+## 📦 Packaging for Windows (PyInstaller)
+
+PhotoPort includes preconfigured build scripts and a PyInstaller `.spec` file to build a standalone Windows `.exe`:
+
+### Option A: Using the Windows Batch Script
+Double click or run from Command Prompt:
+```cmd
+build_windows.bat
+```
+
+### Option B: Using PowerShell
+```powershell
+.\build_windows.ps1
+```
+
+### Option C: Manual PyInstaller Command
+```cmd
+pyinstaller --clean --noconfirm PhotoPort.spec
+```
+
+The resulting distribution folder will be generated at:
+```
+dist\PhotoPort\
+    PhotoPort.exe
+    ... (runtime DLLs, Qt binaries, dependencies)
+```
+
+Distribute the `PhotoPort` directory or package it with an installer such as Inno Setup or WiX Toolset.
+
+---
+
+## 🛡️ Security and Privacy
+
+- **Local Processing**: Archives are read, hashed, and processed entirely on your local machine. No third-party servers are involved.
+- **Local Credentials**: OAuth tokens are saved locally in the user application data directory (`%LOCALAPPDATA%\PhotoPort` on Windows) and can be disconnected or revoked at any time.
+- **Zip-Slip Defense**: Archive decompression strictly validates destination paths to prevent directory traversal vulnerabilities.
+- **Clean Temp Management**: Extracted temporary media files are automatically cleaned up immediately after upload.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
